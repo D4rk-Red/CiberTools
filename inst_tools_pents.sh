@@ -38,6 +38,7 @@ tools=(
     "hashcat"
     "openvpn"
     "sqlmap"
+    "whatweb"
 )
 
 
@@ -120,4 +121,5 @@ if [ $failures -eq 0 ]; then
 else
     message "red" "Algunas herramientas tuvieron problemas durante la instalación.:("
 fi
+
 
