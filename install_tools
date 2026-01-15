@@ -1,0 +1,312 @@
+#!/bin/sh
+# Script de instalación de herramientas pentesting
+# Versión compatible con POSIX
+
+# Configuración
+LOG_FILE="/tmp/pentest-installer-$(date +%Y%m%d-%H%M%S).log"
+MAX_RETRIES=3
+RETRY_DELAY=5
+
+# Variables de control
+SKIP_UPDATE=false
+VERBOSE=false
+SILENT=false
+LIST_TOOLS=false
+
+# Colores (solo si hay terminal)
+if [ -t 1 ]; then
+    RED='\033[0;31m'
+    GREEN='\033[0;32m'
+    YELLOW='\033[0;33m'
+    BLUE='\033[0;34m'
+    CYAN='\033[0;36m'
+    WHITE='\033[1;37m'
+    NC='\033[0m'
+else
+    RED=''; GREEN=''; YELLOW=''; BLUE=''; CYAN=''; WHITE=''; NC=''
+fi
+
+# Lista de herramientas
+TOOLS="nmap gobuster ffuf nikto netcat-traditional smbclient exploitdb john hashcat openvpn sqlmap whatweb hydra wireshark aircrack-ng metasploit-framework"
+
+# Función para logging
+log_message() {
+    level="$1"
+    message="$2"
+    timestamp=$(date '+%Y-%m-%d %H:%M:%S')
+    
+    # Escribir en log file
+    echo "[$timestamp] [$level] $message" >> "$LOG_FILE"
+    
+    # Mostrar en pantalla si no es silencioso
+    if [ "$SILENT" = false ]; then
+        case "$level" in
+            "INFO") 
+                printf "${GREEN}[*]${NC} %s\n" "$message"
+                ;;
+            "WARN") 
+                printf "${YELLOW}[!]${NC} %s\n" "$message"
+                ;;
+            "ERROR") 
+                printf "${RED}[X]${NC} %s\n" "$message"
+                ;;
+            "DEBUG") 
+                if [ "$VERBOSE" = true ]; then
+                    printf "${CYAN}[D]${NC} %s\n" "$message"
+                fi
+                ;;
+            *) 
+                printf "[ ] %s\n" "$message"
+                ;;
+        esac
+    fi
+}
+
+# Función para mostrar mensaje con color
+color_message() {
+    color="$1"
+    text="$2"
+    
+    case "$color" in
+        "red")    printf "${RED}[*] %s${NC}\n" "$text" ;;
+        "green")  printf "${GREEN}[*] %s${NC}\n" "$text" ;;
+        "yellow") printf "${YELLOW}[*] %s${NC}\n" "$text" ;;
+        "blue")   printf "${BLUE}[*] %s${NC}\n" "$text" ;;
+        "cyan")   printf "${CYAN}[*] %s${NC}\n" "$text" ;;
+        "white")  printf "${WHITE}[*] %s${NC}\n" "$text" ;;
+        *)        printf "[*] %s\n" "$text" ;;
+    esac
+}
+
+# Función para verificar sistema
+check_system() {
+    log_message "INFO" "Verificando sistema..."
+    
+    if [ ! -f /etc/os-release ]; then
+        log_message "ERROR" "No se pudo detectar sistema operativo"
+        return 1
+    fi
+    
+    # Cargar información del sistema
+    . /etc/os-release
+    
+    # Verificar si es Debian/Ubuntu
+    if [ "$ID" = "ubuntu" ] || [ "$ID" = "debian" ] || [ "$ID" = "kali" ]; then
+        log_message "INFO" "Sistema compatible: $NAME $VERSION_ID"
+        return 0
+    else
+        log_message "ERROR" "Sistema no compatible: $ID"
+        return 1
+    fi
+}
+
+# Función para verificar dependencia
+check_dependency() {
+    tool="$1"
+    
+    if command -v apt-cache > /dev/null 2>&1; then
+        if apt-cache policy "$tool" 2>/dev/null | grep -q "Installed"; then
+            return 0
+        fi
+    fi
+    
+    # Verificar si el comando existe
+    if command -v "$tool" > /dev/null 2>&1; then
+        return 2  # Ya instalado
+    fi
+    
+    return 1  # No disponible
+}
+
+# Función para instalar herramienta
+install_tool() {
+    tool="$1"
+    retry_count=0
+    
+    while [ $retry_count -lt $MAX_RETRIES ]; do
+        if [ $retry_count -gt 0 ]; then
+            log_message "WARN" "Reintento $retry_count para $tool"
+            sleep "$RETRY_DELAY"
+        fi
+        
+        log_message "INFO" "Instalando $tool..."
+        
+        # Usar apt-get con redirección simple
+        if apt-get install -y "$tool" > /dev/null 2>&1; then
+            # Verificar instalación
+            if dpkg -l | grep -q "^ii.*$tool" || command -v "$tool" > /dev/null 2>&1; then
+                log_message "INFO" "$tool instalado correctamente"
+                return 0
+            fi
+        fi
+        
+        retry_count=$((retry_count + 1))
+    done
+    
+    log_message "ERROR" "Falló instalación de $tool después de $MAX_RETRIES intentos"
+    return 1
+}
+
+# Función para actualizar sistema
+update_system() {
+    if [ "$SKIP_UPDATE" = true ]; then
+        log_message "INFO" "Saltando actualización de paquetes"
+        return 0
+    fi
+    
+    log_message "INFO" "Actualizando lista de paquetes..."
+    
+    # Capturar output en variable temporal
+    temp_file="/tmp/apt-update-$$.log"
+    
+    if apt-get update > "$temp_file" 2>&1; then
+        log_message "INFO" "Paquetes actualizados correctamente"
+        rm -f "$temp_file"
+        return 0
+    else
+        log_message "ERROR" "Error al actualizar paquetes"
+        if [ -f "$temp_file" ]; then
+            log_message "DEBUG" "Detalles en: $temp_file"
+        fi
+        return 1
+    fi
+}
+
+# Función para mostrar ayuda
+show_help() {
+    echo "Uso: $0 [OPCIONES]"
+    echo ""
+    echo "Opciones:"
+    echo "  --skip-update    Saltar actualización de paquetes"
+    echo "  --list-tools     Mostrar lista de herramientas"
+    echo "  --verbose        Modo verboso"
+    echo "  --silent         Modo silencioso (solo log)"
+    echo "  --help           Mostrar esta ayuda"
+    echo ""
+    echo "Ejemplos:"
+    echo "  sudo $0"
+    echo "  sudo $0 --skip-update"
+    echo "  $0 --list-tools"
+    exit 0
+}
+
+# Función para procesar argumentos
+process_arguments() {
+    while [ $# -gt 0 ]; do
+        case "$1" in
+            --skip-update)
+                SKIP_UPDATE=true
+                shift
+                ;;
+            --list-tools)
+                LIST_TOOLS=true
+                shift
+                ;;
+            --verbose)
+                VERBOSE=true
+                shift
+                ;;
+            --silent)
+                SILENT=true
+                shift
+                ;;
+            --help)
+                show_help
+                ;;
+            *)
+                echo "Opción desconocida: $1" >&2
+                show_help
+                exit 1
+                ;;
+        esac
+    done
+}
+
+# Función principal
+main() {
+    # Crear archivo de log
+    touch "$LOG_FILE"
+    log_message "INFO" "Iniciando instalador de herramientas"
+    
+    # Verificar si es root
+    if [ "$(id -u)" -ne 0 ]; then
+        log_message "ERROR" "Este script requiere permisos de superusuario"
+        log_message "INFO" "Ejecutar con: sudo $0"
+        exit 1
+    fi
+    
+    # Procesar argumentos
+    process_arguments "$@"
+    
+    # Mostrar herramientas si se solicita
+    if [ "$LIST_TOOLS" = true ]; then
+        color_message "cyan" "Herramientas a instalar:"
+        for tool in $TOOLS; do
+            printf "  - %s\n" "$tool"
+        done
+        exit 0
+    fi
+    
+    # Verificar sistema
+    if ! check_system; then
+        exit 1
+    fi
+    
+    # Actualizar paquetes
+    if ! update_system; then
+        log_message "WARN" "Continuando con actualización fallida"
+    fi
+    
+    # Separar herramientas en lista
+    log_message "INFO" "Procesando herramientas..."
+    
+    success=0
+    failures=0
+    skipped=0
+    
+    # Instalar cada herramienta
+    for tool in $TOOLS; do
+        log_message "INFO" "---"
+        log_message "INFO" "Procesando: $tool"
+        
+        # Verificar si ya está instalado
+        if dpkg -l | grep -q "^ii.*$tool" || command -v "$tool" > /dev/null 2>&1; then
+            log_message "INFO" "$tool ya está instalado"
+            skipped=$((skipped + 1))
+            continue
+        fi
+        
+        # Verificar disponibilidad
+        if check_dependency "$tool"; then
+            # Instalar herramienta
+            if install_tool "$tool"; then
+                success=$((success + 1))
+            else
+                failures=$((failures + 1))
+            fi
+        else
+            log_message "WARN" "$tool no disponible en repositorios"
+            failures=$((failures + 1))
+        fi
+    done
+    
+    # Mostrar resumen
+    log_message "INFO" "========================================"
+    log_message "INFO" "RESUMEN DE INSTALACIÓN"
+    log_message "INFO" "Herramientas instaladas: $success"
+    log_message "INFO" "Herramientas omitidas: $skipped"
+    log_message "INFO" "Herramientas fallidas: $failures"
+    log_message "INFO" "Total de herramientas: $(echo "$TOOLS" | wc -w)"
+    log_message "INFO" "Log guardado en: $LOG_FILE"
+    
+    if [ $failures -eq 0 ]; then
+        color_message "green" "Instalación completada exitosamente"
+        exit 0
+    else
+        color_message "yellow" "Instalación completada con $failures errores"
+        exit 1
+    fi
+}
+
+# Ejecutar función principal
+main "$@"
