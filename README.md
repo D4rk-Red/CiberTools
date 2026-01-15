@@ -3,5 +3,9 @@ Script sencillo para automatizar la instalación de herramientas basicas para pe
 
 Instalación:
 
-    git clone https://github.com/D4rk-Red/CiberTools/blob/main/inst_tools_pents.sh
-    chmod +x inst_tools_pents.sh
+    git clone https://github.com/D4rk-Red/CiberTools
+    chmod +x install_tools.sh
+
+Ejecución:
+
+    sh install_tools.sh
